@@ -351,8 +351,9 @@ class RemoteAccount(HttpMixin):
 
         def output_generator():
 
+            stdout_lines = []
             for line in iter(stdout.readline, ''):
-
+                stdout_lines.append(line)
                 if callback is None:
                     yield line
                 else:
@@ -360,11 +361,12 @@ class RemoteAccount(HttpMixin):
             try:
                 exit_status = stdout.channel.recv_exit_status()
                 if exit_status != 0:
+                    full_output = "stderr: {}\nstdout: {}".format(stderr.read(), ''.join(stdout_lines))
                     if not allow_fail:
-                        raise RemoteCommandError(self, cmd, exit_status, stderr.read())
+                        raise RemoteCommandError(self, cmd, exit_status, full_output)
                     else:
                         self._log(logging.DEBUG, "Running ssh command '%s' exited with status %d and message: %s" %
-                                  (cmd, exit_status, stderr.read()))
+                                  (cmd, exit_status, full_output))
             finally:
                 stdin.close()
                 stdout.close()
