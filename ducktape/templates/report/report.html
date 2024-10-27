@@ -79,7 +79,7 @@
           var className = this.props.test.test_result;
           var detailCol;
           if (className !== "ignore") {
-            detailCol = <td colSpan='5' align='center'><pre><a href={this.props.test.test_log}>Detail</a></pre></td>
+            detailCol = <td colSpan='5' align='center'><pre><a href={this.props.test.test_log + '/'}>Detail</a></pre></td>
           } else {
             detailCol = <td colSpan='5' align='center'></td>
           }
