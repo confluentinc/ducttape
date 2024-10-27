@@ -29,9 +29,7 @@ Wednesday, November 30th, 2022
 
 0.11.2
 ======
-Wednesday, November 30th, 2022
-------------------------------
-- Bugfix: fixed an edge case when BackgroundThread wait() method errors out if start() method has never been called.
+- automatic release process bugged out; ignore :)
 
 0.11.1
 ======
