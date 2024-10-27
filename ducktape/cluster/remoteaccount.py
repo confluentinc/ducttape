@@ -17,6 +17,9 @@ import logging
 import os
 from paramiko import SSHClient, SSHConfig, MissingHostKeyPolicy
 from paramiko.ssh_exception import SSHException, NoValidConnectionsError
+from dataclasses import dataclass
+from collections import deque
+from typing import Iterable, Iterator
 import shutil
 import signal
 import socket
@@ -27,6 +30,9 @@ import warnings
 from ducktape.utils.http_utils import HttpMixin
 from ducktape.utils.util import wait_until
 from ducktape.errors import DucktapeError
+
+
+NUM_RING_LINES = 33
 
 
 def check_ssh(method):
@@ -113,21 +119,28 @@ class RemoteAccountError(DucktapeError):
         return "%s: %s" % (self.account_str, self.msg)
 
 
+@dataclass
 class RemoteCommandError(RemoteAccountError):
     """This exception is raised when a process run by ssh*() returns a non-zero exit status.
     """
-
-    def __init__(self, account, cmd, exit_status, msg):
-        self.account_str = str(account)
-        self.exit_status = exit_status
-        self.cmd = cmd
-        self.msg = msg
+    account: "RemoteAccount"
+    exit_status: int
+    cmd: str
+    msg: str = ""
+    stdout: Iterable[str] = []
+    stderr: Iterable[str] = []
 
     def __str__(self):
-        msg = "%s: Command '%s' returned non-zero exit status %d." % (self.account_str, self.cmd, self.exit_status)
+        lines = [f"{self.account}: Command {self.cmd} returned non-zero exit status {self.exit_status}.{self.msg}"]
         if self.msg:
-            msg += " Remote error message: %s" % self.msg
-        return msg
+            lines.append(f"\tMessage: {self.msg}")
+        if self.stdout:
+            lines.append(f"\tStdout:")
+            lines.extend(f"\t\t{line}" for line in self.stdout)
+        if self.stderr:
+            lines.append(f"\tStderr:")
+            lines.extend(f"\t\t{line}" for line in self.stderr)
+        return "\n".join(lines)
 
 
 class RemoteAccount(HttpMixin):
@@ -302,12 +315,12 @@ class RemoteAccount(HttpMixin):
 
         # Unfortunately we need to read over the channel to ensure that recv_exit_status won't hang. See:
         # http://docs.paramiko.org/en/2.0/api/channel.html#paramiko.channel.Channel.recv_exit_status
-        stdout.read()
+        stdout_lines = stdout.readlines()
         exit_status = stdout.channel.recv_exit_status()
         try:
             if exit_status != 0:
                 if not allow_fail:
-                    raise RemoteCommandError(self, cmd, exit_status, stderr.read())
+                    raise RemoteCommandError(self, cmd, exit_status, stdout=stdout_lines, stderr=stderr.readlines())
                 else:
                     self._log(logging.DEBUG, "Running ssh command '%s' exited with status %d and message: %s" %
                               (cmd, exit_status, stderr.read()))
@@ -349,10 +362,11 @@ class RemoteAccount(HttpMixin):
         stdout = chan.makefile('r', -1)
         stderr = chan.makefile_stderr('r', -1)
 
+        stdout_buff = deque(maxlen=NUM_RING_LINES)
         def output_generator():
 
             for line in iter(stdout.readline, ''):
-
+                stdout_buff.append(line)
                 if callback is None:
                     yield line
                 else:
@@ -361,7 +375,7 @@ class RemoteAccount(HttpMixin):
                 exit_status = stdout.channel.recv_exit_status()
                 if exit_status != 0:
                     if not allow_fail:
-                        raise RemoteCommandError(self, cmd, exit_status, stderr.read())
+                        raise RemoteCommandError(self, cmd, exit_status, stdout=stdout_buff, stderr=stderr.readlines())
                     else:
                         self._log(logging.DEBUG, "Running ssh command '%s' exited with status %d and message: %s" %
                                   (cmd, exit_status, stderr.read()))
@@ -404,7 +418,7 @@ class RemoteAccount(HttpMixin):
             exit_status = stdin.channel.recv_exit_status()
             if exit_status != 0:
                 if not allow_fail:
-                    raise RemoteCommandError(self, cmd, exit_status, stderr.read())
+                    raise RemoteCommandError(self, cmd, exit_status, stdout=stdoutdata.split("\n"), stderr=stderr.readlines())
                 else:
                     self._log(logging.DEBUG, "Running ssh command '%s' exited with status %d and message: %s" %
                               (cmd, exit_status, stderr.read()))
